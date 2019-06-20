@@ -1,0 +1,2 @@
+[build]
+target = "arn_os-target.json"
