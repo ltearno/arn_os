@@ -4,7 +4,7 @@ This is an attempt to write micro vms and run them with an home made Rust uniker
 
 ## Short term (first and current stage)
 
-Running a very minimal kernel written in Rust with AWS Firecracker.
+Running a very minimal kernel written in Rust with AWS Firecracker. This means be able to target : a _serial port_, a virtio _network_ device and a virtio _block_ device.
 
 ## Long term (who knows when ?)
 
@@ -41,3 +41,6 @@ The Firecracker launched VM should output "Hello 42 times !"
 ## Credits
 
 This would have not been possible without those two things :
+
+- Firecracker : https://github.com/firecracker-microvm/firecracker
+- Philipp Oppermann's blog : https://os.phil-opp.com
