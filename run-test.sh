@@ -15,8 +15,19 @@ curl --unix-socket /tmp/firecracker.socket -i \
     -H 'Accept: application/json'           \
     -H 'Content-Type: application/json'     \
     -d '{
-        "kernel_image_path": "'$(pwd)'/target/arn_os-target/debug/arn_os",
+        "kernel_image_path": "/home/arnaud/repos/third/firecracker/hello-vmlinux.bin",
         "boot_args": "console=ttyS0 reboot=k panic=1 pci=off"
+    }'
+
+curl --unix-socket /tmp/firecracker.socket -i \
+    -X PUT 'http://localhost/drives/rootfs' \
+    -H 'Accept: application/json'           \
+    -H 'Content-Type: application/json'     \
+    -d '{
+        "drive_id": "rootfs",
+        "path_on_host": "/home/arnaud/repos/third/firecracker/hello-rootfs.ext4",
+        "is_root_device": true,
+        "is_read_only": false
     }'
 
 curl --unix-socket /tmp/firecracker.socket -i \
@@ -49,13 +60,3 @@ curl --unix-socket /tmp/firecracker.socket -i \
     }'
 
 echo all commands sent
-
-sleep 5
-
-curl --unix-socket /tmp/firecracker.socket -i \
-    -X PUT 'http://localhost/actions'       \
-    -H  'Accept: application/json'          \
-    -H  'Content-Type: application/json'    \
-    -d '{
-        "action_type": "SendCtrlAltDel"
-    }'
