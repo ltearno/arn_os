@@ -5,7 +5,7 @@ set -e
 echo "Prerequisites: you first have to create the tap device, like this :"
 echo "sudo ip tuntap add tapfc1 mode tap"
 echo "Elsewhere run :"
-echo "rm /tmp/firecracker.socket && firecracker"
+echo "(rm /tmp/firecracker.socket || echo 'nothing to delete') && firecracker"
 echo ""
 
 echo Running ArnOs on Firecracker...
