@@ -24,9 +24,9 @@ fn panic(_panic_info: &PanicInfo) -> ! {
     loop {}
 }
 
+use lazy_static::lazy_static;
 use x86_64::structures::idt::PageFaultErrorCode;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
-use lazy_static::lazy_static;
 
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
@@ -43,10 +43,10 @@ extern "x86-interrupt" fn page_fault_handler(
 ) {
     use x86_64::registers::control::Cr2;
 
-    serial_println!("EXCEPTION: PAGE FAULT");
-    serial_println!("Accessed Address: {:?}", Cr2::read());
-    serial_println!("Error Code: {:?}", error_code);
-    serial_println!("{:#?}", stack_frame);
+    println!("EXCEPTION: PAGE FAULT");
+    println!("Accessed Address: {:?}", Cr2::read());
+    println!("Error Code: {:?}", error_code);
+    println!("{:#?}", stack_frame);
     panic!("EXCEPTION: PAGE FAULT\n{:#?}", stack_frame);
 }
 
@@ -115,64 +115,84 @@ pub extern "C" fn _start() -> ! {
     IDT.load();
 
     let l4_table = unsafe { active_level_4_table() };
-    let mut offset_page_table = unsafe { OffsetPageTable::new(l4_table, VirtAddr::new(0)) };
-
-    //let mut offset_page_table = unsafe { get_offset_page_table() };
-    let virt = VirtAddr::new(0xa000); //0b111111111000000000000000000000 + 0x9020);
-    let phys = offset_page_table.translate_addr(virt);
-    serial_println!("TRANSLATION {:?} -> {:?}", virt, phys);
-    //serial_println!("TABLE {:?}", offset_page_table);
-
-    serial_println!("Hello {} times !", 42);
+    /*let mut frame_allocator = EmptyFrameAllocator;
+    let page = Page::containing_address(VirtAddr::new(0xd0000000));
+    create_example_mapping(page, &mut offset_page_table, &mut frame_allocator);
+    let page_ptr = page.start_address().as_u64();
+    println!("page address : ${:X}", page_ptr);*/
+    println!("Hello {} times !", 42);
 
     //let a = x86_64::PhysAddr::new(0xd0000000);
 
+    let mut l4idx = 0;
+    let mut l3idx = 0;
+    let mut l2idx = 0;
+
     for (i, entry) in l4_table.iter().enumerate() {
         if entry.flags().bits() != 0 {
-            serial_println!("L4 Entry {}: {:?}", i, entry);
+            println!("L4 Entry {}: {:?}", i, entry);
             unsafe {
                 let l3_table = &mut *(entry.addr().as_u64() as *mut PageTable);
                 for (i, entry) in l3_table.iter().enumerate() {
                     if entry.flags().bits() != 0 {
-                        serial_println!("L3 Entry {}: {:?}", i, entry);
+                        println!("L3 Entry {}: {:?}", i, entry);
                         if (entry.flags()
                             & x86_64::structures::paging::page_table::PageTableFlags::HUGE_PAGE)
                             != x86_64::structures::paging::page_table::PageTableFlags::HUGE_PAGE
                         {
-                            unsafe {
-                                let l2_table = &mut *(entry.addr().as_u64() as *mut PageTable);
-                                for (i, entry) in l2_table.iter().enumerate() {
-                                    if entry.flags().bits() != 0 {
-                                        serial_println!("L2 Entry {}: {:?}", i, entry);
-                                        if (entry.flags() & x86_64::structures::paging::page_table::PageTableFlags::HUGE_PAGE) != x86_64::structures::paging::page_table::PageTableFlags::HUGE_PAGE
-                                        {
-                                        unsafe {
+                            let mut l2_table = &mut *(entry.addr().as_u64() as *mut PageTable);
+                            for (i, entry) in l2_table.iter_mut().enumerate() {
+                                if entry.flags().bits() != 0 {
+                                    if (l4idx == 0 && l3idx == 0 && l2idx == 4) {
+                                        entry.set_addr(PhysAddr::new(0xd0000000), entry.flags());
+                                    }
+                                    println!("L2 Entry {}: {:?}", i, entry);
+                                    if (entry.flags() & x86_64::structures::paging::page_table::PageTableFlags::HUGE_PAGE) != x86_64::structures::paging::page_table::PageTableFlags::HUGE_PAGE {
                                             let l1_table =
                                                 &mut *(entry.addr().as_u64() as *mut PageTable);
                                             for (i, entry) in l1_table.iter().enumerate() {
                                                 if entry.flags().bits() != 0 {
-                                                    serial_println!("L1 Entry {}: {:?}", i, entry);
+                                                    println!("L1 Entry {}: {:?}", i, entry);
                                                 }
                                             }
                                         }
-                                    }
-                                    }
                                 }
+                                l2idx = l2idx + 1;
                             }
                         }
                     }
+                    l3idx = l3idx + 1;
                 }
             }
         }
+        l4idx = l4idx + 1;
     }
+
+    x86_64::instructions::tlb::flush_all();
+
+    let offset_page_table = unsafe { OffsetPageTable::new(l4_table, VirtAddr::new(0)) };
+    //let mut offset_page_table = unsafe { get_offset_page_table() };
+    let virt = VirtAddr::new(0b100000000000_000000000000); //0b111111111000000000000000000000 + 0x9020);
+    let phys = offset_page_table.translate_addr(virt);
+    println!("TRANSLATION {:?} -> {:?}", virt, phys);
+    //println!("TABLE {:?}", offset_page_table);
+
+
+    let start_address = 0b100000000000_000000000000 as *mut u32;
+    unsafe {
+        let value = *start_address.offset(0);
+        println!("{:X}", value);
+    }
+
+
 
     let mut result: i32 = 0;
     let (cr3, _) = Cr3::read();
-    serial_println!("cr3 is currently {:?}", cr3);
+    println!("cr3 is currently {:?}", cr3);
     let cr0 = Cr0::read();
-    serial_println!("cr0 is currently {:?}", cr0);
+    println!("cr0 is currently {:?}", cr0);
     let cr4 = Cr4::read();
-    serial_println!("cr4 is currently {:?}", cr4);
+    println!("cr4 is currently {:?}", cr4);
     unsafe {
         asm!(r"
         mov %esi, $0
@@ -180,18 +200,15 @@ pub extern "C" fn _start() -> ! {
         //asm!("cpuid" : "={eax}"(result) : "{eax}"(0x80000000) : : "intel");
         //asm!("int $$0x05" : /* no outputs */ : /* no inputs */ : /*"{eax}"*/);
     }
-    serial_println!("eax is currently {:X}", result);
+    println!("eax is currently {:X}", result);
 
     let boot_param_address = ZERO_PAGE_START as *mut bootparam::boot_params;
     unsafe {
         for i in 0..128 {
             let entry = (*boot_param_address).e820_table[i];
-            serial_println!(
+            println!(
                 "entry {:X} {:X} {:X} {}",
-                i,
-                entry.addr,
-                entry.size,
-                entry.type_
+                i, entry.addr, entry.size, entry.type_
             );
             if entry.size == 0 {
                 break;
@@ -203,7 +220,7 @@ pub extern "C" fn _start() -> ! {
     loop {
         unsafe {
             let value = *start_address.offset(i);
-            //serial_print!("{:X}", value);
+            //print!("{:X}", value);
             serial::print_raw(value);
             if (value == 0) {
                 break;
@@ -212,23 +229,16 @@ pub extern "C" fn _start() -> ! {
         i = i + 1;
     }
 
-    serial_println!("");
+    println!("");
 
-    /*let mut frame_allocator = EmptyFrameAllocator;
-    let page = Page::containing_address(VirtAddr::new(0xd0000000));
-    create_example_mapping(page, &mut offset_page_table, &mut frame_allocator);
-    let page_ptr = page.start_address().as_u64();
-    serial_println!("page address : ${:X}", page_ptr);*/
-
-    
-    serial_println!("start address : ${:X}", FIRST_DEVICE_ADDRESS);
-    serial_println!("I am searching for an mmio device (magic is 0x74726976)...");
+    println!("start address : ${:X}", FIRST_DEVICE_ADDRESS);
+    println!("I am searching for an mmio device (magic is 0x74726976)...");
     let start_address = FIRST_DEVICE_ADDRESS as *mut u8;
     unsafe {
         // *start_address = 54;
-        //serial_print!("written !!!");
+        //print!("written !!!");
         let value = *start_address.offset(0);
-        serial_print!("{:08x} ", value);
+        print!("{:08x} ", value);
     }
 
     /*unsafe {
@@ -241,20 +251,20 @@ pub extern "C" fn _start() -> ! {
         for ofs in 0..7 {
             unsafe  {
                 let value = *start_address.offset(i+ofs);
-                serial_print!("{:X} ", value)
+                print!("{:X} ", value)
                 //if (value == 0x74 && *start_address.offset(i+1)==0x72)
                 //    || (value == 0x72 && *start_address.offset(i+1)==0x74) {
-                //    serial_println!("{:X}: {:X} {:X} {:X} {:X}", i, value, *start_address.offset(i+1), *start_address.offset(i+2), *start_address.offset(i+3));
+                //    println!("{:X}: {:X} {:X} {:X} {:X}", i, value, *start_address.offset(i+1), *start_address.offset(i+2), *start_address.offset(i+3));
                 //}
                 //if *start_address.offset(i)==0x74726976 {
-                //    serial_println!("found at 0x{:X}", i);
+                //    println!("found at 0x{:X}", i);
                 //}
             }
         }
 
         i = i+8;
 
-        serial_println!("");
+        println!("");
     }*/
 
     loop {}
