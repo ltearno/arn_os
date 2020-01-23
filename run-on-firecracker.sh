@@ -5,6 +5,7 @@ set -e
 echo "Prerequisites: you first have to create the tap device, like this :"
 echo "sudo ip tuntap add tapfc1 mode tap"
 echo "Elsewhere run :"
+echo "sudo setfacl -m u:${USER}:rw /dev/kvm"
 echo "(rm /tmp/firecracker.socket || echo 'nothing to delete') && firecracker"
 echo ""
 

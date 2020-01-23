@@ -7,12 +7,16 @@ mod bootparam;
 mod serial;
 
 use core::panic::PanicInfo;
+use lazy_static::lazy_static;
 use x86_64::registers::control::Cr0;
 use x86_64::registers::control::Cr3;
 use x86_64::registers::control::Cr4;
+use x86_64::structures::idt::InterruptDescriptorTable;
+use x86_64::structures::idt::InterruptStackFrame;
+use x86_64::structures::idt::PageFaultErrorCode;
 use x86_64::structures::paging::OffsetPageTable;
 use x86_64::structures::paging::PageTable;
-use x86_64::structures::paging::PageTableFlags as Flags;
+use x86_64::structures::paging::PageTableFlags;
 use x86_64::{structures::paging::MapperAllSizes, VirtAddr};
 use x86_64::{
     structures::paging::{FrameAllocator, Mapper, Page, PhysFrame, Size4KiB, UnusedPhysFrame},
@@ -24,15 +28,11 @@ fn panic(_panic_info: &PanicInfo) -> ! {
     loop {}
 }
 
-use lazy_static::lazy_static;
-use x86_64::structures::idt::PageFaultErrorCode;
-use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
-
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::new();
         idt.page_fault.set_handler_fn(page_fault_handler);
-        idt.double_fault.set_handler_fn(double_fault_handler); // new
+        idt.double_fault.set_handler_fn(double_fault_handler);
         idt
     };
 }
@@ -47,7 +47,7 @@ extern "x86-interrupt" fn page_fault_handler(
     println!("Accessed Address: {:?}", Cr2::read());
     println!("Error Code: {:?}", error_code);
     println!("{:#?}", stack_frame);
-    panic!("EXCEPTION: PAGE FAULT\n{:#?}", stack_frame);
+    panic!("Bye\n");
 }
 
 extern "x86-interrupt" fn double_fault_handler(
@@ -77,21 +77,17 @@ unsafe impl FrameAllocator<Size4KiB> for EmptyFrameAllocator {
     }
 }
 
-pub unsafe fn active_level_4_table() -> &'static mut PageTable {
-    use x86_64::registers::control::Cr3;
-
+pub fn active_level_4_table() -> &'static mut PageTable {
     let (level_4_table_frame, _) = Cr3::read();
 
     let phys = level_4_table_frame.start_address();
     let virt = phys.as_u64();
-    let page_table_ptr: *mut PageTable = virt as *mut PageTable;
 
-    &mut *page_table_ptr // unsafe
-}
+    unsafe {
+        let page_table_ptr: *mut PageTable = virt as *mut PageTable;
 
-pub unsafe fn get_offset_page_table() -> OffsetPageTable<'static> {
-    let level_4_table = active_level_4_table();
-    OffsetPageTable::new(level_4_table, VirtAddr::new(0))
+        &mut *page_table_ptr // unsafe
+    }
 }
 
 pub fn create_example_mapping(
@@ -99,12 +95,10 @@ pub fn create_example_mapping(
     mapper: &mut OffsetPageTable,
     frame_allocator: &mut impl FrameAllocator<Size4KiB>,
 ) {
-    use x86_64::structures::paging::PageTableFlags as Flags;
-
     let frame = PhysFrame::containing_address(PhysAddr::new(0xd0000000));
     // FIXME: ONLY FOR TEMPORARY TESTING
     let unused_frame = unsafe { UnusedPhysFrame::new(frame) };
-    let flags = Flags::PRESENT | Flags::WRITABLE;
+    let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
 
     let map_to_result = mapper.map_to(page, unused_frame, flags, frame_allocator);
     map_to_result.expect("map_to failed").flush();
@@ -113,14 +107,19 @@ pub fn create_example_mapping(
 #[no_mangle]
 pub extern "C" fn _start() -> ! {
     IDT.load();
-
     let l4_table = unsafe { active_level_4_table() };
+
+    let (level_4_table_frame, _) = Cr3::read();
+    println!(
+        "L4 table address: {:X}",
+        level_4_table_frame.start_address().as_u64()
+    );
+
     /*let mut frame_allocator = EmptyFrameAllocator;
     let page = Page::containing_address(VirtAddr::new(0xd0000000));
     create_example_mapping(page, &mut offset_page_table, &mut frame_allocator);
     let page_ptr = page.start_address().as_u64();
     println!("page address : ${:X}", page_ptr);*/
-    println!("Hello {} times !", 42);
 
     //let a = x86_64::PhysAddr::new(0xd0000000);
 
@@ -171,37 +170,33 @@ pub extern "C" fn _start() -> ! {
     x86_64::instructions::tlb::flush_all();
 
     let offset_page_table = unsafe { OffsetPageTable::new(l4_table, VirtAddr::new(0)) };
-    //let mut offset_page_table = unsafe { get_offset_page_table() };
     let virt = VirtAddr::new(0b100000000000_000000000000); //0b111111111000000000000000000000 + 0x9020);
     let phys = offset_page_table.translate_addr(virt);
     println!("TRANSLATION {:?} -> {:?}", virt, phys);
-    //println!("TABLE {:?}", offset_page_table);
-
 
     let start_address = 0b100000000000_000000000000 as *mut u32;
     unsafe {
         let value = *start_address.offset(0);
-        println!("{:X}", value);
+        println!("{:X}", value); // should be 'virt'
     }
 
-
-
     let mut result: i32 = 0;
-    let (cr3, _) = Cr3::read();
-    println!("cr3 is currently {:?}", cr3);
     let cr0 = Cr0::read();
     println!("cr0 is currently {:?}", cr0);
+    let (cr3, _) = Cr3::read();
+    println!("cr3 is currently {:?}", cr3);
     let cr4 = Cr4::read();
     println!("cr4 is currently {:?}", cr4);
-    unsafe {
+    /*unsafe {
         asm!(r"
         mov %esi, $0
         ": "=r"(result));
         //asm!("cpuid" : "={eax}"(result) : "{eax}"(0x80000000) : : "intel");
         //asm!("int $$0x05" : /* no outputs */ : /* no inputs */ : /*"{eax}"*/);
     }
-    println!("eax is currently {:X}", result);
+    println!("eax is currently {:X}", result);*/
 
+    // boot params
     let boot_param_address = ZERO_PAGE_START as *mut bootparam::boot_params;
     unsafe {
         for i in 0..128 {
@@ -215,57 +210,6 @@ pub extern "C" fn _start() -> ! {
             }
         }
     }
-    let start_address = 0x20000 as *mut u8;
-    let mut i = 0;
-    loop {
-        unsafe {
-            let value = *start_address.offset(i);
-            //print!("{:X}", value);
-            serial::print_raw(value);
-            if (value == 0) {
-                break;
-            }
-        }
-        i = i + 1;
-    }
-
-    println!("");
-
-    println!("start address : ${:X}", FIRST_DEVICE_ADDRESS);
-    println!("I am searching for an mmio device (magic is 0x74726976)...");
-    let start_address = FIRST_DEVICE_ADDRESS as *mut u8;
-    unsafe {
-        // *start_address = 54;
-        //print!("written !!!");
-        let value = *start_address.offset(0);
-        print!("{:08x} ", value);
-    }
-
-    /*unsafe {
-        //asm!("mov eax, 2" : "={eax}"(result) : : : "intel");
-        asm!("int $$0x05" : /* no outputs */ : /* no inputs */ : "intel");
-    }*/
-
-    /*let mut i = 0;
-    loop {
-        for ofs in 0..7 {
-            unsafe  {
-                let value = *start_address.offset(i+ofs);
-                print!("{:X} ", value)
-                //if (value == 0x74 && *start_address.offset(i+1)==0x72)
-                //    || (value == 0x72 && *start_address.offset(i+1)==0x74) {
-                //    println!("{:X}: {:X} {:X} {:X} {:X}", i, value, *start_address.offset(i+1), *start_address.offset(i+2), *start_address.offset(i+3));
-                //}
-                //if *start_address.offset(i)==0x74726976 {
-                //    println!("found at 0x{:X}", i);
-                //}
-            }
-        }
-
-        i = i+8;
-
-        println!("");
-    }*/
 
     loop {}
 }
